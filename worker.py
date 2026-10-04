@@ -23,7 +23,7 @@ def results_dir():
 
     #Write under the dataset mount. Database comes later.
 
-    dataset = "/domino/datasets/local/Domino_Takehome"
+    dataset = "/domino/datasets/local/Worker1Raw"
     if not os.path.isdir(dataset):
         raise FileNotFoundError(f"dataset directory missing: {dataset}")
     path = os.path.join(dataset, "results")
