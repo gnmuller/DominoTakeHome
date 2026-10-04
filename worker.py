@@ -21,14 +21,12 @@ N_COLS = 12
 
 def results_dir():
 
-    #Going to Artifacts First, because of saftey reasons
-    #Will push to dataset later, then to database later on
+    #Write under the dataset mount. Database comes later.
 
-   
-    artifacts = "/mnt/artifacts"
-    if not os.path.isdir(artifacts):
-        raise FileNotFoundError(f"artifacts directory missing: {artifacts}")
-    path = os.path.join(artifacts, "results")
+    dataset = "/domino/datasets/local/Domino_Takehome"
+    if not os.path.isdir(dataset):
+        raise FileNotFoundError(f"dataset directory missing: {dataset}")
+    path = os.path.join(dataset, "results")
     os.makedirs(path, exist_ok=True)
     return path
 
