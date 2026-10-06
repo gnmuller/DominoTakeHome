@@ -16,7 +16,7 @@ from worker1 import (
 )
 
 RAW = "/mnt/data/Worker1Raw"
-DB = "/mnt/data/Worker2DB"
+DB = "/mnt/data/Worker2DatabaseProxy"
 artifacts_logs = "/mnt/artifacts/logs"
 
 
