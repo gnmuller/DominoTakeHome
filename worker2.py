@@ -16,9 +16,8 @@ from worker1 import (
 )
 
 RAW = "/mnt/data/Worker1Raw"
-HERE = os.path.dirname(os.path.abspath(__file__))
-DB = os.path.join(HERE, "mock_db.csv")
-LOG = os.path.join(HERE, "worker2.log")
+DB = "/mnt/data/Worker2DB"
+artifacts_logs = "/mnt/artifacts/logs"
 
 
 def plate_rows(ws):
@@ -93,15 +92,18 @@ def xlsx_files(root):
     return sorted(found)
 
 
-def log_skip(filename, reason):
+def log_skip(filename, quartet, reason):
     if not reason.startswith("skipped:"):
         reason = f"skipped: {reason}"
     stamp = datetime.now().isoformat(timespec="seconds")
-    with open(LOG, "a", encoding="utf-8") as handle:
-        handle.write(f"{stamp} {filename}: {reason}\n")
+    plate = ", ".join(map(str, quartet)) if quartet else ""
+    os.makedirs(os.path.dirname(artifacts_logs) or ".", exist_ok=True)
+    with open(artifacts_logs, "a", encoding="utf-8") as handle:
+        handle.write(f"{stamp} {filename}: {plate} | {reason}\n")
 
 
 def _self_check():
+    global artifacts_logs
     ws = build_workbook(PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0]).active
     quartet, rows = plate_rows(ws)
     assert len(rows) == 96
@@ -109,25 +111,50 @@ def _self_check():
     assert duplicate_reason(quartet, {quartet}) == (
         "skipped: plate already in mock_db (" + ", ".join(quartet) + ")"
     )
+    saved = artifacts_logs
+    folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_w2_log_check")
+    artifacts_logs = os.path.join(folder, "logs")
+    try:
+        log_skip("bad.xlsx", quartet, "skipped: A2 serum not allowed")
+        logged = open(artifacts_logs, encoding="utf-8").read()
+        assert f"{', '.join(quartet)} | skipped: A2 serum not allowed" in logged
+    finally:
+        artifacts_logs = saved
+        if os.path.isfile(os.path.join(folder, "logs")):
+            os.remove(os.path.join(folder, "logs"))
+        if os.path.isdir(folder):
+            os.rmdir(folder)
 
 
 def main():
+
+
+    #Confirm a fake build of workbook.
     _self_check()
+
     if not os.path.isdir(RAW):
         raise FileNotFoundError(f"dataset directory missing: {RAW}")
+
+    #Build Set List of known plates.    
     known = known_plates(DB)
+
     accepted = skipped = 0
+
+    #Cycle Through All Workbooks in the directory.
     for path in xlsx_files(RAW):
         name = os.path.basename(path)
+        quartet = None
         try:
-            quartet, rows = plate_rows(load_workbook(path).active)
+            ws = load_workbook(path).active
+            quartet = tuple(ws[cell].value for cell in ("A1", "A2", "A3", "A4"))
+            quartet, rows = plate_rows(ws)
         except Exception as exc:
-            log_skip(name, str(exc))
+            log_skip(name, quartet, str(exc))
             skipped += 1
             continue
         reason = duplicate_reason(quartet, known)
         if reason:
-            log_skip(name, reason)
+            log_skip(name, quartet, reason)
             skipped += 1
             continue
         append_rows(DB, rows)
