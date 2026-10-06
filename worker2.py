@@ -61,7 +61,7 @@ def duplicate_reason(quartet, known):
 
 def known_plates(path):
     plates = set()
-    with open(path, newline="", encoding="utf-8") as handle:
+    with open(os.path.join(path, "mock_db.csv"), newline="", encoding="utf-8") as handle:
         for row in csv.DictReader(handle):
             plates.add(
                 (row["project"], row["serums"], row["PARAMETERS"], row["initals"])
@@ -70,6 +70,7 @@ def known_plates(path):
 
 
 def append_rows(path, rows):
+    path = os.path.join(path, "mock_db.csv")
     with open(path, "rb") as handle:
         handle.seek(0, os.SEEK_END)
         size = handle.tell()
