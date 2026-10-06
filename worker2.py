@@ -93,14 +93,18 @@ def xlsx_files(root):
     return sorted(found)
 
 
-def log_skip(filename, quartet, reason):
-    if not reason.startswith("skipped:"):
-        reason = f"skipped: {reason}"
+def log_line(filename, quartet, message):
     stamp = datetime.now().isoformat(timespec="seconds")
     plate = ", ".join(map(str, quartet)) if quartet else ""
     os.makedirs(os.path.dirname(artifacts_logs) or ".", exist_ok=True)
     with open(artifacts_logs, "a", encoding="utf-8") as handle:
-        handle.write(f"{stamp} {filename}: {plate} | {reason}\n")
+        handle.write(f"{stamp} {filename}: {plate} | {message}\n")
+
+
+def log_skip(filename, quartet, reason):
+    if not reason.startswith("skipped:"):
+        reason = f"skipped: {reason}"
+    log_line(filename, quartet, reason)
 
 
 def _self_check():
@@ -117,8 +121,10 @@ def _self_check():
     artifacts_logs = os.path.join(folder, "logs")
     try:
         log_skip("bad.xlsx", quartet, "skipped: A2 serum not allowed")
+        log_line("good.xlsx", quartet, "accepted")
         logged = open(artifacts_logs, encoding="utf-8").read()
         assert f"{', '.join(quartet)} | skipped: A2 serum not allowed" in logged
+        assert "good.xlsx:" in logged and f"{', '.join(quartet)} | accepted" in logged
     finally:
         artifacts_logs = saved
         if os.path.isfile(os.path.join(folder, "logs")):
@@ -160,6 +166,7 @@ def main():
             continue
         append_rows(DB, rows)
         known.add(quartet)
+        log_line(name, quartet, "accepted")
         accepted += 1
     print(f"accepted {accepted}, skipped {skipped}")
     if skipped:
