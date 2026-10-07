@@ -50,35 +50,32 @@ ROWS = "ABCDEFGH"
 N_COLS = 12
 
 
-def results_dir():
+def results_dir(subdir="results"):
 
     #Write under the dataset mount. Database comes later.
 
     dataset = "/mnt/data/Worker1Raw"
     if not os.path.isdir(dataset):
         raise FileNotFoundError(f"dataset directory missing: {dataset}")
-    path = os.path.join(dataset, "results")
+    path = os.path.join(dataset, subdir)
     os.makedirs(path, exist_ok=True)
     return path
 
 
-def fake_readings():
+def fake_readings(seed=4, low=0.050, high=2.500):
 
     #N_Cols AND ROWS
     #Are standard and defined up top
-
-
-    random.seed(4)
-
     #Uniform Range Choosen because
     #Usual readable window for an ELISA plate reader at 450 nm
+    rng = random.Random(seed)
     return [
-        [round(random.uniform(0.050, 2.500), 3) for _ in range(N_COLS)]
+        [round(rng.uniform(low, high), 3) for _ in range(N_COLS)]
         for _ in ROWS
     ]
 
 
-def build_workbook(project, serum, parameter, initials):
+def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=2.500):
     wb = Workbook()
     ws = wb.active
     ws.title = "Plate"
@@ -93,7 +90,7 @@ def build_workbook(project, serum, parameter, initials):
         ws.cell(row=5, column=col + 1, value=col)
 
 
-    readings = fake_readings()
+    readings = fake_readings(seed, low, high)
 
     
     for r, letter in enumerate(ROWS):
