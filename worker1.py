@@ -93,6 +93,7 @@ def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=
     ws["A4"] = initials
     ws["B1"] = day
     ws["B2"] = analyst_letter(initials)
+    ws["C1"] = "North Lab"
     ws["C3"] = date.today().strftime("%d%b%Y")
 
 
@@ -119,6 +120,7 @@ def assert_layout(path, project, serum, parameter, initials, day="day 1"):
     assert ws["A4"].value == initials
     assert ws["B1"].value == day
     assert ws["B2"].value == analyst_letter(initials)
+    assert ws["C1"].value == "North Lab"
     assert ws["C3"].value == date.today().strftime("%d%b%Y")
     cells = [
         cell.value

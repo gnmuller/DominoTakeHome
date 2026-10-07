@@ -55,6 +55,7 @@ PARAMETER_ALIASES = {
 }
 LABS = {
     "lab1": "Lab1",
+    "north lab": "Lab1",
     "west lab": "Lab2",
     "lab2": "Lab2",
     "east lab": "Lab3",
