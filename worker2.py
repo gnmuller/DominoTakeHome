@@ -2,7 +2,7 @@ import csv
 import os
 import re
 import sys
-from datetime import datetime
+from datetime import date, datetime
 
 from openpyxl import load_workbook
 
@@ -13,11 +13,14 @@ from worker1 import (
     PROJECTS,
     ROWS,
     SERUMS,
+    analyst_letter,
     build_workbook,
 )
 
 # ponytail: a comma is always a decimal mark; "1.234,5" is rejected.
-HOLES = {"OVRFLW", "OVERFLOW", "****", "#N/A", "#DIV/0!", "ND", "N.A.", "N.A", "NA", "BLANK"}
+OVERFLOW = {"OVRFLW", "OVERFLOW", "****"}
+MISSING = {"#N/A", "#DIV/0!", "ND", "N.A.", "N.A", "NA"}
+EXTRA_COLUMNS = ("lab", "instrument", "run_date", "flag", "day", "analyst")
 SERUM_ALIASES = {
     "pooled normal human serum": "Pooled Normal Human Serum",
     "pooled nhs": "Pooled Normal Human Serum",
@@ -88,18 +91,67 @@ def canon_lab(value):
     return LABS.get(_token(value), str(value).strip())
 
 
+def _stamp(value):
+    return value.strftime("%d%b%Y")
+
+
+def canon_day(value):
+    text = "" if value is None else " ".join(str(value).strip().lower().split())
+    match = re.fullmatch(r"day (\d+)", text)
+    if not match:
+        return ""
+    number = int(match.group(1))
+    if number < 1:
+        return ""
+    return f"day {number}"
+
+
+def canon_date(value):
+    text = "" if value is None else str(value).strip()
+    if not text:
+        return ""
+    for fmt in ("%m/%d/%Y", "%d %b %Y", "%Y-%m-%d", "%d%b%Y"):
+        try:
+            return _stamp(datetime.strptime(text, fmt).date())
+        except ValueError:
+            continue
+    return ""
+
+
+def date_from_name(filename):
+    text = os.path.basename(filename or "")
+    match = re.search(r"(20\d{2})-(\d{2})-(\d{2})", text)
+    if match:
+        try:
+            return _stamp(date(int(match.group(1)), int(match.group(2)), int(match.group(3))))
+        except ValueError:
+            return ""
+    match = re.search(r"(?<!\d)(\d{2})(\d{2})(20\d{2})(?!\d)", text)
+    if not match:
+        return ""
+    try:
+        return _stamp(date(int(match.group(3)), int(match.group(1)), int(match.group(2))))
+    except ValueError:
+        return ""
+
+
 def parse_well(value, well):
     if isinstance(value, bool):
         raise ValueError(f"skipped: well {well} is not a number")
     if isinstance(value, (int, float)):
-        return float(value)
+        return float(value), ""
     if value is None:
-        return None
+        return None, "blank"
     if not isinstance(value, str):
         raise ValueError(f"skipped: well {well} is not a number")
     text = value.strip()
-    if text == "" or text.upper() in HOLES:
-        return None
+    token = text.upper()
+    if text == "" or token == "BLANK":
+        return None, "blank"
+    if token in OVERFLOW:
+        return None, "overflow"
+    if token in MISSING:
+        return None, "na"
     if text.endswith("%"):
         text = text[:-1].strip()
     lower = text.lower()
@@ -110,17 +162,19 @@ def parse_well(value, well):
     if "," in text and "." in text:
         raise ValueError(f"skipped: well {well} is not a number")
     try:
-        return float(text.replace(",", "."))
+        return float(text.replace(",", ".")), ""
     except ValueError:
         raise ValueError(f"skipped: well {well} is not a number") from None
 
 
-def plate_rows(ws):
+def plate_rows(ws, filename=""):
     project = canon_project(ws["A1"].value)
     serum = canon_name(ws["A2"].value, SERUM_ALIASES, SERUMS)
     parameter = canon_name(ws["A3"].value, PARAMETER_ALIASES, PARAMETERS)
     initials = "" if ws["A4"].value is None else str(ws["A4"].value).strip().upper()
     lab = canon_lab(ws["C1"].value)
+    instrument = "" if ws["C2"].value is None else str(ws["C2"].value).strip()
+    run_date = canon_date(ws["C3"].value) or date_from_name(filename)
     fields = (
         ("A1", "project", PROJECTS, project),
         ("A2", "serum", SERUMS, serum),
@@ -130,8 +184,15 @@ def plate_rows(ws):
     for cell, label, allowed, value in fields:
         if value not in allowed:
             raise ValueError(f'skipped: {cell} {label} not allowed: "{value}"')
+    raw_day = ws["B1"].value
+    day = canon_day(raw_day)
+    if not day:
+        raise ValueError(f'skipped: B1 day not allowed: "{raw_day}"')
+    analyst = "" if ws["B2"].value is None else str(ws["B2"].value).strip().upper()
+    if analyst != analyst_letter(initials):
+        raise ValueError(f'skipped: B2 analyst not allowed: "{analyst}"')
     rows = []
-    dropped = 0
+    flagged = 0
     for r, letter in enumerate(ROWS):
         got = ws.cell(row=5 + r, column=1).value
         got = "" if got is None else str(got).strip().upper()
@@ -139,10 +200,9 @@ def plate_rows(ws):
             raise ValueError(f"skipped: row {letter} label is {got!r}")
         for c in range(1, N_COLS + 1):
             well = f"{letter}{c}"
-            number = parse_well(ws.cell(row=5 + r, column=c + 1).value, well)
-            if number is None:
-                dropped += 1
-                continue
+            number, flag = parse_well(ws.cell(row=5 + r, column=c + 1).value, well)
+            if flag:
+                flagged += 1
             rows.append(
                 [
                     project,
@@ -150,11 +210,16 @@ def plate_rows(ws):
                     parameter,
                     initials,
                     well,
-                    f"{number:.3f}",
+                    "" if number is None else f"{number:.3f}",
                     lab,
+                    instrument,
+                    run_date,
+                    flag,
+                    day,
+                    analyst,
                 ]
             )
-    return (project, serum, parameter, initials, lab), rows, dropped
+    return (project, serum, parameter, initials, lab, day, run_date), rows, flagged
 
 
 def duplicate_reason(quartet, known):
@@ -163,7 +228,7 @@ def duplicate_reason(quartet, known):
     return None
 
 
-def ensure_lab_column(path):
+def ensure_columns(path):
     file_path = os.path.join(path, "mock_db.csv")
     with open(file_path, encoding="utf-8", newline="") as handle:
         content = handle.read()
@@ -171,11 +236,13 @@ def ensure_lab_column(path):
         return
     line, sep, rest = content.partition("\n")
     header_line = line[:-1] if line.endswith("\r") else line
-    if "lab" in next(csv.reader([header_line])):
+    header = next(csv.reader([header_line]))
+    missing = [name for name in EXTRA_COLUMNS if name not in header]
+    if not missing:
         return
     nl = "\r\n" if line.endswith("\r") else ("\n" if sep else "")
     with open(file_path, "w", encoding="utf-8", newline="") as handle:
-        handle.write(header_line + ",lab" + nl + rest)
+        handle.write(header_line + "," + ",".join(missing) + nl + rest)
 
 
 def known_plates(path):
@@ -189,6 +256,8 @@ def known_plates(path):
                     row["PARAMETERS"],
                     row["initals"],
                     row.get("lab") or "Lab1",
+                    row.get("day") or "",
+                    row.get("run_date") or "",
                 )
             )
     return plates
@@ -237,25 +306,39 @@ def _self_check():
     from worker1_lab2 import dirty as dirty_west
     from worker1_lab3 import dirty as dirty_east
 
+    today = date.today().strftime("%d%b%Y")
     ws = build_workbook(PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0]).active
-    quartet, rows, dropped = plate_rows(ws)
-    assert dropped == 0 and len(rows) == 96 and quartet[-1] == "Lab1"
+    quartet, rows, flagged = plate_rows(ws, f"assay_plate_{date.today().isoformat()}_AB_abcd.xlsx")
+    assert flagged == 0 and len(rows) == 96 and quartet[4:] == ("Lab1", "day 1", today)
+    assert rows[0][7:] == ["", today, "", "day 1", "A"]
+    assert analyst_letter(INITIALS[0]) == "A"
+    assert analyst_letter(INITIALS[1]) == "B"
     assert duplicate_reason(quartet, set()) is None
     assert duplicate_reason(quartet, {quartet}) == (
         "skipped: plate already in mock_db (" + ", ".join(quartet) + ")"
     )
+    other = quartet[:5] + ("day 2", quartet[6])
+    assert duplicate_reason(other, {quartet}) is None
+    ws["C3"] = "12Dec2023"
+    _, stamped, _ = plate_rows(ws)
+    assert stamped[0][8] == "12Dec2023"
+    ws["C3"] = None
+    _, named, _ = plate_rows(ws, "assay_plate_2023-12-12_AB.xlsx")
+    assert named[0][8] == "12Dec2023"
 
     west = build_workbook(PROJECTS[0], SERUMS[3], PARAMETERS[0], INITIALS[0]).active
     original_a3 = west.cell(row=5, column=4).value
     dirty_west(west, PROJECTS[0], SERUMS[3], PARAMETERS[0], INITIALS[0])
     string_well = west.cell(row=5, column=4).value
     assert isinstance(string_well, str)
-    quartet, rows, dropped = plate_rows(west)
-    by_well = {row[4]: row[5] for row in rows}
-    assert quartet == (PROJECTS[0], SERUMS[3], PARAMETERS[0], INITIALS[0], "Lab2")
-    assert dropped == 2 and len(rows) == 94
-    assert "A1" not in by_well and "A2" not in by_well
-    assert by_well["A3"] == f"{float(string_well):.3f}" == f"{original_a3:.3f}"
+    quartet, rows, flagged = plate_rows(west)
+    by_well = {row[4]: (row[5], row[9]) for row in rows}
+    assert quartet == (PROJECTS[0], SERUMS[3], PARAMETERS[0], INITIALS[0], "Lab2", "day 1", today)
+    assert flagged == 2 and len(rows) == 96
+    assert by_well["A1"] == ("", "overflow") and by_well["A2"] == ("", "blank")
+    assert by_well["A3"] == (f"{float(string_well):.3f}", "")
+    assert by_well["A3"][0] == f"{original_a3:.3f}"
+    assert rows[0][7] == "BioTek Synergy H1" and rows[0][8] == today
 
     percent = PARAMETERS[-1]
     east = build_workbook(PROJECTS[1], SERUMS[2], percent, INITIALS[1]).active
@@ -264,14 +347,17 @@ def _self_check():
     dirty_east(east, PROJECTS[1], SERUMS[2], percent, INITIALS[1])
     assert east.cell(row=5, column=1).value == "a"
     assert east["A14"].value
-    quartet, rows, dropped = plate_rows(east)
-    by_well = {row[4]: row[5] for row in rows}
-    assert quartet == (PROJECTS[1], SERUMS[2], percent, INITIALS[1], "Lab3")
-    assert dropped == 1 and "A4" not in by_well
-    assert by_well["A1"] == f"{original_a1:.3f}"
-    assert by_well["A3"] == f"{original_a3:.3f}"
-    assert by_well["A5"] == "-0.015" and by_well["A6"] == "-0.008"
-    assert by_well["A7"] == "45.000"
+    quartet, rows, flagged = plate_rows(east)
+    by_well = {row[4]: (row[5], row[9]) for row in rows}
+    assert quartet == (PROJECTS[1], SERUMS[2], percent, INITIALS[1], "Lab3", "day 1", today)
+    assert flagged == 1 and len(rows) == 96
+    assert by_well["A4"] == ("", "na")
+    assert by_well["A1"][0] == f"{original_a1:.3f}" and by_well["A1"][1] == ""
+    assert by_well["A3"][0] == f"{original_a3:.3f}"
+    assert by_well["A5"] == ("-0.015", "") and by_well["A6"] == ("-0.008", "")
+    assert by_well["A7"] == ("45.000", "")
+    assert rows[0][7] == "hand entry" and rows[0][8] == today
+    assert rows[0][10:] == ["day 1", "B"]
 
     saved = artifacts_logs
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_w2_log_check")
@@ -290,9 +376,11 @@ def _self_check():
             handle.write(
                 f"{PROJECTS[0]},{SERUMS[0]},{PARAMETERS[0]},{INITIALS[0]},A1,1.000\n"
             )
-        ensure_lab_column(db_dir)
+        ensure_columns(db_dir)
+        with open(db_path, encoding="utf-8", newline="") as handle:
+            assert next(csv.reader(handle))[-len(EXTRA_COLUMNS):] == list(EXTRA_COLUMNS)
         assert known_plates(db_dir) == {
-            (PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0], "Lab1")
+            (PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0], "Lab1", "", "")
         }
         with open(db_path, "a", encoding="utf-8", newline="") as handle:
             handle.write(
@@ -304,6 +392,8 @@ def _self_check():
             PARAMETERS[1],
             INITIALS[1],
             "Lab2",
+            "",
+            "",
         ) in known_plates(db_dir)
     finally:
         artifacts_logs = saved
@@ -327,7 +417,7 @@ def main():
         raise FileNotFoundError(f"dataset directory missing: {RAW}")
 
     #Build Set List of known plates.
-    ensure_lab_column(DB)
+    ensure_columns(DB)
     known = known_plates(DB)
 
     accepted = skipped = 0
@@ -339,7 +429,7 @@ def main():
         try:
             ws = load_workbook(path).active
             quartet = tuple(ws[cell].value for cell in ("A1", "A2", "A3", "A4"))
-            quartet, rows, dropped = plate_rows(ws)
+            quartet, rows, flagged = plate_rows(ws, name)
         except Exception as exc:
             log_skip(name, quartet, str(exc))
             skipped += 1
@@ -351,7 +441,7 @@ def main():
             continue
         append_rows(DB, rows)
         known.add(quartet)
-        detail = "accepted" if not dropped else f"accepted, dropped {dropped} wells"
+        detail = "accepted" if not flagged else f"accepted, flagged {flagged} wells"
         log_line(name, quartet, detail)
         accepted += 1
     print(f"accepted {accepted}, skipped {skipped}")

@@ -7,6 +7,7 @@ from datetime import date
 from openpyxl import load_workbook
 
 from worker1 import (
+    DAYS,
     INITIALS,
     PARAMETERS,
     PROJECTS,
@@ -42,8 +43,8 @@ RANGES = {
 }
 
 
-def plate_seed(project, serum, parameter, initials):
-    key = f"west|{project}|{serum}|{parameter}|{initials}"
+def plate_seed(project, serum, parameter, initials, day):
+    key = f"west|{project}|{serum}|{parameter}|{initials}|{day}"
     return zlib.adler32(key.encode()) & 0x7FFFFFFF
 
 
@@ -70,15 +71,17 @@ def main():
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
+    day = random.choice(DAYS)
     low, high = RANGES[parameter]
     wb = build_workbook(
         project,
         serum,
         parameter,
         initials,
-        seed=plate_seed(project, serum, parameter, initials),
+        seed=plate_seed(project, serum, parameter, initials, day),
         low=low,
         high=high,
+        day=day,
     )
     dirty(wb.active, project, serum, parameter, initials)
     today = date.today()

@@ -6,7 +6,7 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from worker1 import INITIALS, PARAMETERS, PROJECTS, SERUMS, build_workbook, results_dir
+from worker1 import DAYS, INITIALS, PARAMETERS, PROJECTS, SERUMS, build_workbook, results_dir
 
 # Hand-typed names. Worker 2 maps these back onto the Lab 1 lists.
 SERUM_OUT = {
@@ -17,8 +17,8 @@ SERUM_OUT = {
 }
 
 
-def plate_seed(project, serum, parameter, initials):
-    key = f"east|{project}|{serum}|{parameter}|{initials}"
+def plate_seed(project, serum, parameter, initials, day):
+    key = f"east|{project}|{serum}|{parameter}|{initials}|{day}"
     return zlib.adler32(key.encode()) & 0x7FFFFFFF
 
 
@@ -55,12 +55,14 @@ def main():
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
+    day = random.choice(DAYS)
     wb = build_workbook(
         project,
         serum,
         parameter,
         initials,
-        seed=plate_seed(project, serum, parameter, initials),
+        seed=plate_seed(project, serum, parameter, initials, day),
+        day=day,
     )
     dirty(wb.active, project, serum, parameter, initials)
     today = date.today()

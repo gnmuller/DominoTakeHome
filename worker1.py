@@ -45,6 +45,14 @@ assert len(SERUMS) == 4
 assert len(PARAMETERS) == 7
 assert len(INITIALS) == 10
 
+# Member 1 is A. A team of six would be A-F; this roster is 10, so A-J.
+DAYS = ("day 1", "day 2", "day 3")
+
+
+def analyst_letter(initials):
+    return chr(ord("A") + INITIALS.index(initials))
+
+
 #Standard 96 well plate
 ROWS = "ABCDEFGH"
 N_COLS = 12
@@ -75,7 +83,7 @@ def fake_readings(seed=4, low=0.050, high=2.500):
     ]
 
 
-def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=2.500):
+def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=2.500, day="day 1"):
     wb = Workbook()
     ws = wb.active
     ws.title = "Plate"
@@ -83,6 +91,9 @@ def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=
     ws["A2"] = serum
     ws["A3"] = parameter
     ws["A4"] = initials
+    ws["B1"] = day
+    ws["B2"] = analyst_letter(initials)
+    ws["C3"] = date.today().strftime("%d%b%Y")
 
 
 
@@ -100,12 +111,15 @@ def build_workbook(project, serum, parameter, initials, seed=4, low=0.050, high=
     return wb
 
 
-def assert_layout(path, project, serum, parameter, initials):
+def assert_layout(path, project, serum, parameter, initials, day="day 1"):
     ws = load_workbook(path).active
     assert ws["A1"].value == project
     assert ws["A2"].value == serum
     assert ws["A3"].value == parameter
     assert ws["A4"].value == initials
+    assert ws["B1"].value == day
+    assert ws["B2"].value == analyst_letter(initials)
+    assert ws["C3"].value == date.today().strftime("%d%b%Y")
     cells = [
         cell.value
         for row in ws.iter_rows(min_row=5, max_row=12, min_col=2, max_col=13)
@@ -120,17 +134,18 @@ def main():
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
+    day = random.choice(DAYS)
     today = date.today()
     suffix = uuid.uuid4().hex[:8]
     name = (
         f"assay_plate_{today.year}-{today.month:02d}-{today.day:02d}"
         f"_{initials}_{suffix}.xlsx"
     )
-    path = os.path.join(results_dir(), name)
-    build_workbook(project, serum, parameter, initials).save(path)
+    path = os.path.join(results_dir("lab1"), name)
+    build_workbook(project, serum, parameter, initials, day=day).save(path)
 
     #Checkworkbook
-    assert_layout(path, project, serum, parameter, initials)
+    assert_layout(path, project, serum, parameter, initials, day)
     print(path)
 
 
