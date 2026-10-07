@@ -2,26 +2,22 @@ from flytekit import workflow
 from flytekitplugins.domino.task import DominoJobConfig, DominoJobTask
 
 @workflow
-def simple_math_workflow(a: int, b: int) -> float:
-
-    # Create first task
-    add_task = DominoJobTask(
-        name='Add numbers',
-        domino_job_config=DominoJobConfig(Command="python add.py"),
-        inputs={'first_value': int, 'second_value': int},
-        outputs={'sum': int},
+def worker1_workflow():
+    lab1 = DominoJobTask(
+        name='Lab 1',
+        domino_job_config=DominoJobConfig(Command="python worker1.py"),
         use_latest=True
     )
-    sum = add_task(first_value=a, second_value=b)
-
-    # Create second task
-    sqrt_task = DominoJobTask(
-        name='Square root',
-        domino_job_config=DominoJobConfig(Command="python sqrt.py"),
-        inputs={'value': int},
-        outputs={'sqrt': float},
+    lab2 = DominoJobTask(
+        name='Lab 2',
+        domino_job_config=DominoJobConfig(Command="python worker1_lab2.py"),
         use_latest=True
     )
-    sqrt = sqrt_task(value=sum)
-
-    return sqrt
+    lab3 = DominoJobTask(
+        name='Lab 3',
+        domino_job_config=DominoJobConfig(Command="python worker1_lab3.py"),
+        use_latest=True
+    )
+    lab1()
+    lab2()
+    lab3()
