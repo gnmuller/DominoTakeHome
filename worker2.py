@@ -88,7 +88,7 @@ def canon_name(value, aliases, allowed):
 
 def canon_lab(value):
     if value is None or str(value).strip() == "":
-        return "Lab1"
+        return ""
     return LABS.get(_token(value), str(value).strip())
 
 
@@ -192,6 +192,9 @@ def plate_rows(ws, filename=""):
     analyst = "" if ws["B2"].value is None else str(ws["B2"].value).strip().upper()
     if analyst != analyst_letter(initials):
         raise ValueError(f'skipped: B2 analyst not allowed: "{analyst}"')
+    for label, value in (("lab", lab), ("instrument", instrument), ("run_date", run_date)):
+        if not value:
+            raise ValueError(f"skipped: plate missing {label}")
     rows = []
     flagged = 0
     for r, letter in enumerate(ROWS):
@@ -309,9 +312,30 @@ def _self_check():
 
     today = date.today().strftime("%d%b%Y")
     ws = build_workbook(PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0]).active
+    ws["C2"] = "SpectraMax iD3"
     quartet, rows, flagged = plate_rows(ws, f"assay_plate_{date.today().isoformat()}_AB_abcd.xlsx")
     assert flagged == 0 and len(rows) == 96 and quartet[4:] == ("Lab1", "day 1", today)
-    assert rows[0][7:] == ["", today, "", "day 1", "A"]
+    assert rows[0][7:] == ["SpectraMax iD3", today, "", "day 1", "A"]
+    missing = build_workbook(PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0]).active
+    try:
+        plate_rows(missing, "nodate.xlsx")
+        raise AssertionError("missing instrument accepted")
+    except ValueError as exc:
+        assert str(exc) == "skipped: plate missing instrument"
+    missing["C2"] = "SpectraMax iD3"
+    missing["C3"] = None
+    try:
+        plate_rows(missing, "nodate.xlsx")
+        raise AssertionError("missing run_date accepted")
+    except ValueError as exc:
+        assert str(exc) == "skipped: plate missing run_date"
+    missing["C3"] = today
+    missing["C1"] = None
+    try:
+        plate_rows(missing, "nodate.xlsx")
+        raise AssertionError("missing lab accepted")
+    except ValueError as exc:
+        assert str(exc) == "skipped: plate missing lab"
     assert analyst_letter(INITIALS[0]) == "A"
     assert analyst_letter(INITIALS[1]) == "B"
     assert duplicate_reason(quartet, set()) is None
