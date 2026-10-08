@@ -6,7 +6,8 @@ import streamlit as st
 
 DB = "/mnt/data/Worker2DatabaseProxy/mock_db.csv"
 QUARTET = ("project", "serums", "PARAMETERS", "initals")
-EXTRA = ("lab", "day", "analyst", "flag", "instrument", "run_date")
+PRIMARY = ("project", "lab", "run_date", "serums")
+MORE = ("PARAMETERS", "initals", "day", "analyst", "flag", "instrument")
 LABELS = {
     "project": "Project",
     "serums": "Serum",
@@ -86,7 +87,7 @@ def _self_check():
     assert [row["cell"] for row in matching(rows, {}, "A1")] == ["A1"]
 
 
-def _dropdown(rows, column, filters):
+def _sync(rows, column, filters):
     others = {
         key: st.session_state.get(key)
         for key in filters
@@ -95,6 +96,11 @@ def _dropdown(rows, column, filters):
     choices = options(rows, column, others)
     if column in st.session_state and st.session_state[column] not in choices:
         st.session_state[column] = None
+    return choices
+
+
+def _dropdown(rows, column, filters):
+    choices = _sync(rows, column, filters)
     return st.selectbox(
         LABELS[column],
         choices,
@@ -110,20 +116,30 @@ _self_check()
 if not os.path.isfile(DB):
     st.error(f"database file missing: {DB}")
     st.stop()
-else:
-    rows, columns = load_rows(DB)
-    filters = [name for name in QUARTET + EXTRA if name in columns]
-    chosen = {}
-    for column in [name for name in QUARTET if name in filters]:
-        value = _dropdown(rows, column, filters)
-        if value:
-            chosen[column] = value
-    well = st.text_input("Well", key="well_query", placeholder="A7 or A")
-    for column in [name for name in EXTRA if name in filters]:
-        value = _dropdown(rows, column, filters)
-        if value:
-            chosen[column] = value
 
-    match = matching(rows, chosen, well)
-    st.write(count_line(match, columns))
-    st.dataframe(display_rows(match, columns), hide_index=True)
+rows, columns = load_rows(DB)
+missing = [LABELS[name] for name in PRIMARY if name not in columns]
+if missing:
+    st.error("database missing required columns: " + ", ".join(missing))
+    st.stop()
+
+filters = [name for name in PRIMARY + MORE if name in columns]
+for column in PRIMARY:
+    _dropdown(rows, column, PRIMARY)
+if not all(st.session_state.get(column) for column in PRIMARY):
+    st.write("Select project, lab, run date, and serum to view results.")
+    st.stop()
+
+more = [name for name in MORE if name in columns]
+for column in more:
+    _sync(rows, column, filters)
+chosen = {key: st.session_state[key] for key in filters if st.session_state.get(key)}
+well = st.session_state.get("well_query") or ""
+match = matching(rows, chosen, well)
+st.write(count_line(match, columns))
+st.dataframe(display_rows(match, columns), hide_index=True)
+with st.container():
+    st.caption("More filters")
+    for column in more:
+        _dropdown(rows, column, filters)
+    st.text_input("Well", key="well_query", placeholder="A7 or A")
