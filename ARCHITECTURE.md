@@ -19,7 +19,6 @@ Solid boxes are tasks in `workflow.py`. Dashed boxes are in the repo and started
 
 ```mermaid
 flowchart TD
-  wf["workflow.py<br/>Flyte · 3 tasks"]
   l1["Lab 1 · North<br/>worker1.py"]
   l2["Lab 2 · West<br/>worker1_lab2.py"]
   l3["Lab 3 · East<br/>worker1_lab3.py"]
