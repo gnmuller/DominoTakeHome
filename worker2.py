@@ -232,7 +232,14 @@ def duplicate_reason(quartet, known):
 
 
 def ensure_columns(path):
+    os.makedirs(path, exist_ok=True)
     file_path = os.path.join(path, "mock_db.csv")
+    if not os.path.isfile(file_path):
+        with open(file_path, "w", encoding="utf-8", newline="") as handle:
+            csv.writer(handle).writerow(
+                ("project", "serums", "PARAMETERS", "initals", "cell", "value") + EXTRA_COLUMNS
+            )
+        return
     with open(file_path, encoding="utf-8", newline="") as handle:
         content = handle.read()
     if not content:
@@ -395,6 +402,12 @@ def _self_check():
         assert f"{', '.join(quartet)} | skipped: A2 serum not allowed" in logged
         assert "good.xlsx:" in logged and f"{', '.join(quartet)} | accepted" in logged
         db_path = os.path.join(db_dir, "mock_db.csv")
+        ensure_columns(db_dir)
+        with open(db_path, encoding="utf-8", newline="") as handle:
+            assert next(csv.reader(handle)) == [
+                "project", "serums", "PARAMETERS", "initals", "cell", "value", *EXTRA_COLUMNS
+            ]
+        assert known_plates(db_dir) == set()
         with open(db_path, "w", encoding="utf-8", newline="") as handle:
             handle.write("project,serums,PARAMETERS,initals,cell,value\n")
             handle.write(
