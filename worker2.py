@@ -1,7 +1,6 @@
 import csv
 import os
 import re
-import sys
 from datetime import date, datetime
 
 from openpyxl import load_workbook
@@ -470,8 +469,6 @@ def main():
         log_line(name, quartet, detail)
         accepted += 1
     print(f"accepted {accepted}, skipped {skipped}")
-    if skipped:
-        sys.exit(1)
 
 
 if __name__ == "__main__":
