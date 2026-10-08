@@ -28,9 +28,9 @@ flowchart TD
   log["worker2.txt<br/>artifact log"]
   app["app.py<br/>Streamlit :8888"]
 
-  wf --> l1 --> raw
-  wf --> l2 --> raw
-  wf --> l3 --> raw
+  l1 --> raw
+  l2 --> raw
+  l3 --> raw
   raw -.-> w2
   w2 --> db
   w2 --> log
