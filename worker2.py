@@ -63,7 +63,7 @@ LABS = {
 
 RAW = "/mnt/data/Worker1Raw"
 DB = "/mnt/data/Worker2DatabaseProxy"
-artifacts_logs = "/mnt/artifacts/logs"
+artifacts_logs = "/mnt/artifacts/logs/worker2.txt"
 
 
 def _token(value):
@@ -386,7 +386,7 @@ def _self_check():
     saved = artifacts_logs
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_w2_log_check")
     db_dir = os.path.join(folder, "db")
-    artifacts_logs = os.path.join(folder, "logs")
+    artifacts_logs = os.path.join(folder, "logs", "worker2.txt")
     os.makedirs(db_dir, exist_ok=True)
     try:
         log_skip("bad.xlsx", quartet, "skipped: A2 serum not allowed")
@@ -421,12 +421,14 @@ def _self_check():
         ) in known_plates(db_dir)
     finally:
         artifacts_logs = saved
-        for name in ("logs", os.path.join("db", "mock_db.csv")):
+        for name in (os.path.join("logs", "worker2.txt"), os.path.join("db", "mock_db.csv")):
             file_path = os.path.join(folder, name)
             if os.path.isfile(file_path):
                 os.remove(file_path)
-        if os.path.isdir(db_dir):
-            os.rmdir(db_dir)
+        for name in ("logs", "db"):
+            dir_path = os.path.join(folder, name)
+            if os.path.isdir(dir_path):
+                os.rmdir(dir_path)
         if os.path.isdir(folder):
             os.rmdir(folder)
 
