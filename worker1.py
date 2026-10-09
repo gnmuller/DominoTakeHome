@@ -3,6 +3,7 @@ import os
 import random
 import subprocess
 import sys
+import tempfile
 import uuid
 from datetime import date, datetime
 
@@ -74,9 +75,6 @@ def results_dir(subdir="results"):
     return path
 
 
-ARTIFACTS_LOG = "/mnt/artifacts/worker1.txt"
-
-
 def code_version():
     try:
         out = subprocess.run(
@@ -113,12 +111,35 @@ def run_record(path, project, serum, parameter, initials, day, seed, low, high, 
     }
 
 
+def _append(path, line):
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    with open(path, "a", encoding="utf-8") as handle:
+        handle.write(line)
+        handle.flush()
+        os.fsync(handle.fileno())
+
+
+def log_destinations(plate_path):
+    # Flow jobs do not keep /mnt/artifacts. The dataset mount is where the xlsx already landed.
+    plate_dir = os.path.dirname(plate_path)
+    dataset = os.path.dirname(plate_dir)
+    dests = [
+        os.path.join(dataset, "worker1.txt"),
+        os.path.join(plate_dir, "worker1.txt"),
+    ]
+    root = os.environ.get("DOMINO_ARTIFACTS_DIR") or "/mnt/artifacts"
+    if os.path.isdir(root):
+        dests.append(os.path.join(root, "worker1.txt"))
+    return dests
+
+
 def log_created(path, project, serum, parameter, initials, day, seed, low, high):
     # ponytail: one append, no lock. A short line stays intact under PIPE_BUF; a longer record needs a lock.
     record = run_record(path, project, serum, parameter, initials, day, seed, low, high)
-    os.makedirs(os.path.dirname(ARTIFACTS_LOG) or ".", exist_ok=True)
-    with open(ARTIFACTS_LOG, "a", encoding="utf-8") as handle:
-        handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    for dest in log_destinations(path):
+        _append(dest, line)
+    print(line, end="", flush=True)
 
 
 def fake_readings(seed=4, low=0.050, high=2.500):
@@ -212,6 +233,25 @@ def _self_check():
     assert record["parameters"] == {"seed": 4, "low": 0.050, "high": 2.500}
     assert record["what"] == "assay.xlsx"
     assert record["where"] == "/mnt/data/Worker1Raw/lab1/assay.xlsx"
+    root = tempfile.mkdtemp()
+    plate = os.path.join(root, "lab2", "assay.xlsx")
+    saved = os.environ.get("DOMINO_ARTIFACTS_DIR")
+    os.environ["DOMINO_ARTIFACTS_DIR"] = os.path.join(root, "missing-artifacts")
+    try:
+        dests = log_destinations(plate)
+    finally:
+        if saved is None:
+            os.environ.pop("DOMINO_ARTIFACTS_DIR", None)
+        else:
+            os.environ["DOMINO_ARTIFACTS_DIR"] = saved
+    assert dests == [
+        os.path.join(root, "worker1.txt"),
+        os.path.join(root, "lab2", "worker1.txt"),
+    ]
+    line = json.dumps(record, separators=(",", ":")) + "\n"
+    for dest in dests:
+        _append(dest, line)
+        assert open(dest, encoding="utf-8").read().endswith(line)
 
 
 def main():

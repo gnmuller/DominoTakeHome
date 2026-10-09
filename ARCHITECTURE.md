@@ -93,7 +93,7 @@ The file in the repo is a seed: 960 rows, 10 plates, 96 wells each, and only the
 
 ### worker1.txt
 
-Append-only log at `/mnt/artifacts/worker1.txt`. Each lab job appends one JSON line after its plate assert passes. The line records when the job ran, the filename, and the full path, plus the input id (`project|serum|parameter|initials|day` from the values passed into `build_workbook`), the git commit (or the Flyte task version, or `unknown`), the seed and reading range, the Python, openpyxl, and hardware tier, and `DOMINO_RUN_ID` (or `local`). A failed assert does not log. Jobs still print the saved path to stdout. No rotation and no lock; each line is one write.
+Append-only log of one JSON line per accepted plate. The line records when the job ran, the filename, and the full path, plus the input id (`project|serum|parameter|initials|day` from the values passed into `build_workbook`), the git commit (or the Flyte task version, or `unknown`), the seed and reading range, the Python, openpyxl, and hardware tier, and `DOMINO_RUN_ID` (or `local`). The same line is appended to `/mnt/data/Worker1Raw/worker1.txt`, to `worker1.txt` in that lab's folder, and printed on stdout. Flow jobs do not keep `/mnt/artifacts`, so the dataset copies are the ones that remain. When `/mnt/artifacts` or `DOMINO_ARTIFACTS_DIR` already exists, the line is appended there too. A failed assert does not log. No rotation and no lock; each line is one write.
 
 ### worker2.txt
 
@@ -144,8 +144,8 @@ Every lab starts from `build_workbook`. Worker 2 reads the same cells. This layo
 
 ## Mounts
 
-- `/mnt/data/Worker1Raw` holds `lab1`, `lab2`, and `lab3`.
+- `/mnt/data/Worker1Raw` holds `lab1`, `lab2`, and `lab3`, plus `worker1.txt` and a `worker1.txt` inside each lab folder.
 - `/mnt/data/Worker2DatabaseProxy` holds the live CSV.
-- `/mnt/artifacts/worker1.txt` is the lab creation log.
+- `/mnt/artifacts/worker1.txt` is a copy of the lab creation log when that directory is already mounted.
 - `/mnt/artifacts/worker2.txt` is the ingest log.
 - `/workflow/inputs` and `/workflow/outputs` belong only to `add.py` and `sqrt.py`.
