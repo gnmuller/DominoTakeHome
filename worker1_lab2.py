@@ -12,7 +12,9 @@ from worker1 import (
     PARAMETERS,
     PROJECTS,
     SERUMS,
+    _self_check,
     build_workbook,
+    log_created,
     results_dir,
 )
 
@@ -67,18 +69,20 @@ def dirty(ws, project, serum, parameter, initials):
 
 
 def main():
+    _self_check()
     project = random.choice(PROJECTS)
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
     day = random.choice(DAYS)
+    seed = plate_seed(project, serum, parameter, initials, day)
     low, high = RANGES[parameter]
     wb = build_workbook(
         project,
         serum,
         parameter,
         initials,
-        seed=plate_seed(project, serum, parameter, initials, day),
+        seed=seed,
         low=low,
         high=high,
         day=day,
@@ -99,6 +103,7 @@ def main():
     assert ws["A3"].value == PARAMETER_OUT[parameter]
     assert ws.cell(row=5, column=2).value == "OVRFLW"
     assert ws.cell(row=5, column=3).value is None
+    log_created(path, project, serum, parameter, initials, day, seed, low, high)
     print(path)
 
 

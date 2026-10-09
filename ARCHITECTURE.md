@@ -23,6 +23,7 @@ flowchart TD
   l2["Lab 2 · West<br/>worker1_lab2.py"]
   l3["Lab 3 · East<br/>worker1_lab3.py"]
   raw["Worker1Raw<br/>xlsx plates"]
+  w1log["worker1.txt<br/>creation log"]
   w2["worker2.py<br/>normalize"]
   db["mock_db.csv<br/>database"]
   log["worker2.txt<br/>artifact log"]
@@ -31,6 +32,9 @@ flowchart TD
   l1 --> raw
   l2 --> raw
   l3 --> raw
+  l1 --> w1log
+  l2 --> w1log
+  l3 --> w1log
   raw -.-> w2
   w2 --> db
   w2 --> log
@@ -87,13 +91,17 @@ Columns, including the spellings the app expects: `project`, `serums`, `PARAMETE
 
 The file in the repo is a seed: 960 rows, 10 plates, 96 wells each, and only the first six columns. The app will refuse it until `lab` and `run_date` exist, and the app does not open this path.
 
+### worker1.txt
+
+Append-only log at `/mnt/artifacts/worker1.txt`. Each lab job appends one JSON line after its plate assert passes. The line records when the job ran, the filename, and the full path, plus the input id (`project|serum|parameter|initials|day` from the values passed into `build_workbook`), the git commit (or the Flyte task version, or `unknown`), the seed and reading range, the Python, openpyxl, and hardware tier, and `DOMINO_RUN_ID` (or `local`). A failed assert does not log. Jobs still print the saved path to stdout. No rotation and no lock; each line is one write.
+
 ### worker2.txt
 
 Append-only log at `/mnt/artifacts/worker2.txt`. One line per file: timestamp, filename, plate identity, then accepted, accepted with a flagged-well count, or skipped plus the reason.
 
-Lab jobs do not write this file. They print the saved xlsx path to job stdout. The Streamlit app logs only in the UI.
+Lab jobs do not write this file. The Streamlit app logs only in the UI.
 
-No rotation, no second log, and no record of which filename was ingested. A second file with the same plate identity is a duplicate skip.
+No rotation, and no record of which filename was ingested. A second file with the same plate identity is a duplicate skip.
 
 ## Plate contract
 
@@ -115,9 +123,9 @@ Every lab starts from `build_workbook`. Worker 2 reads the same cells. This layo
 | Piece | Role | Reads | Writes |
 | --- | --- | --- | --- |
 | `workflow.py` | Flyte workflow, three `DominoJobTask`s, no data passed between them | Project files | Lab 1, Lab 2, Lab 3 jobs |
-| `worker1.py` | Vocabulary, plate builder, Lab 1 writer | In-code lists | `/mnt/data/Worker1Raw/lab1` |
-| `worker1_lab2.py` | West Lab dirty export | `build_workbook` | `/mnt/data/Worker1Raw/lab2` |
-| `worker1_lab3.py` | East Lab dirty export | `build_workbook` | `/mnt/data/Worker1Raw/lab3` |
+| `worker1.py` | Vocabulary, plate builder, Lab 1 writer | In-code lists | `/mnt/data/Worker1Raw/lab1` and `worker1.txt` |
+| `worker1_lab2.py` | West Lab dirty export | `build_workbook` | `/mnt/data/Worker1Raw/lab2` and `worker1.txt` |
+| `worker1_lab3.py` | East Lab dirty export | `build_workbook` | `/mnt/data/Worker1Raw/lab3` and `worker1.txt` |
 | `worker2.py` | Ingest, compliance, append | Every xlsx under `Worker1Raw` | `mock_db.csv` and `worker2.txt` |
 | `app.py` + `app.sh` | Filter and show wells | Mounted `mock_db.csv` | Browser on port 8888 |
 
@@ -138,5 +146,6 @@ Every lab starts from `build_workbook`. Worker 2 reads the same cells. This layo
 
 - `/mnt/data/Worker1Raw` holds `lab1`, `lab2`, and `lab3`.
 - `/mnt/data/Worker2DatabaseProxy` holds the live CSV.
+- `/mnt/artifacts/worker1.txt` is the lab creation log.
 - `/mnt/artifacts/worker2.txt` is the ingest log.
 - `/workflow/inputs` and `/workflow/outputs` belong only to `add.py` and `sqrt.py`.

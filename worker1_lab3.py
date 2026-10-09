@@ -6,7 +6,17 @@ from datetime import date
 
 from openpyxl import load_workbook
 
-from worker1 import DAYS, INITIALS, PARAMETERS, PROJECTS, SERUMS, build_workbook, results_dir
+from worker1 import (
+    DAYS,
+    INITIALS,
+    PARAMETERS,
+    PROJECTS,
+    SERUMS,
+    _self_check,
+    build_workbook,
+    log_created,
+    results_dir,
+)
 
 # Hand-typed names. Worker 2 maps these back onto the Lab 1 lists.
 SERUM_OUT = {
@@ -51,17 +61,22 @@ def dirty(ws, _project, serum, parameter, initials):
 
 
 def main():
+    _self_check()
     project = random.choice(PROJECTS)
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
     day = random.choice(DAYS)
+    seed = plate_seed(project, serum, parameter, initials, day)
+    low, high = 0.050, 2.500
     wb = build_workbook(
         project,
         serum,
         parameter,
         initials,
-        seed=plate_seed(project, serum, parameter, initials, day),
+        seed=seed,
+        low=low,
+        high=high,
         day=day,
     )
     dirty(wb.active, project, serum, parameter, initials)
@@ -82,6 +97,7 @@ def main():
     assert ws.cell(row=5, column=1).value == "a"
     assert ws.cell(row=5, column=5).value == "#N/A"
     assert "," in str(ws.cell(row=5, column=2).value)
+    log_created(path, project, serum, parameter, initials, day, seed, low, high)
     print(path)
 
 

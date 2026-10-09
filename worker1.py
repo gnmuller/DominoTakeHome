@@ -1,8 +1,12 @@
+import json
 import os
 import random
+import subprocess
+import sys
 import uuid
-from datetime import date
+from datetime import date, datetime
 
+import openpyxl
 from openpyxl import Workbook, load_workbook
 
 _pool = random.Random(1)
@@ -70,6 +74,53 @@ def results_dir(subdir="results"):
     return path
 
 
+ARTIFACTS_LOG = "/mnt/artifacts/worker1.txt"
+
+
+def code_version():
+    try:
+        out = subprocess.run(
+            ["git", "rev-parse", "HEAD"],
+            capture_output=True,
+            text=True,
+            timeout=2,
+            cwd=os.path.dirname(os.path.abspath(__file__)),
+        )
+        if out.returncode == 0 and out.stdout.strip():
+            return out.stdout.strip()
+    except (OSError, subprocess.TimeoutExpired):
+        pass
+    return os.environ.get("FLYTE_INTERNAL_TASK_VERSION") or "unknown"
+
+
+def environment():
+    py = f"{sys.version_info.major}.{sys.version_info.minor}.{sys.version_info.micro}"
+    hardware = os.environ.get("DOMINO_HARDWARE_TIER_ID") or "local"
+    return f"python {py}; openpyxl {openpyxl.__version__}; hardware {hardware}"
+
+
+def run_record(path, project, serum, parameter, initials, day, seed, low, high, when=None):
+    return {
+        "when": when or datetime.now().isoformat(timespec="seconds"),
+        "what": os.path.basename(path),
+        "where": path,
+        "lab": os.path.basename(os.path.dirname(path)),
+        "input_id": f"{project}|{serum}|{parameter}|{initials}|{day}",
+        "code_version": code_version(),
+        "parameters": {"seed": seed, "low": low, "high": high},
+        "environment": environment(),
+        "run_id": os.environ.get("DOMINO_RUN_ID") or "local",
+    }
+
+
+def log_created(path, project, serum, parameter, initials, day, seed, low, high):
+    # ponytail: one append, no lock. A short line stays intact under PIPE_BUF; a longer record needs a lock.
+    record = run_record(path, project, serum, parameter, initials, day, seed, low, high)
+    os.makedirs(os.path.dirname(ARTIFACTS_LOG) or ".", exist_ok=True)
+    with open(ARTIFACTS_LOG, "a", encoding="utf-8") as handle:
+        handle.write(json.dumps(record, separators=(",", ":")) + "\n")
+
+
 def fake_readings(seed=4, low=0.050, high=2.500):
 
     #N_Cols AND ROWS
@@ -131,12 +182,46 @@ def assert_layout(path, project, serum, parameter, initials, day="day 1"):
     assert all(isinstance(value, (int, float)) for value in cells)
 
 
+def _self_check():
+    record = run_record(
+        "/mnt/data/Worker1Raw/lab1/assay.xlsx",
+        "Domino-0000001",
+        "Pooled Normal Human Serum",
+        "Absorbance (OD450)",
+        "AB",
+        "day 1",
+        4,
+        0.050,
+        2.500,
+        when="2026-10-09T10:19:00",
+    )
+    for key in (
+        "when",
+        "what",
+        "where",
+        "input_id",
+        "code_version",
+        "parameters",
+        "environment",
+        "run_id",
+    ):
+        assert record.get(key) not in (None, "")
+    assert record["input_id"] == (
+        "Domino-0000001|Pooled Normal Human Serum|Absorbance (OD450)|AB|day 1"
+    )
+    assert record["parameters"] == {"seed": 4, "low": 0.050, "high": 2.500}
+    assert record["what"] == "assay.xlsx"
+    assert record["where"] == "/mnt/data/Worker1Raw/lab1/assay.xlsx"
+
+
 def main():
+    _self_check()
     project = random.choice(PROJECTS)
     serum = random.choice(SERUMS)
     parameter = random.choice(PARAMETERS)
     initials = random.choice(INITIALS)
     day = random.choice(DAYS)
+    seed, low, high = 4, 0.050, 2.500
     today = date.today()
     suffix = uuid.uuid4().hex[:8]
     name = (
@@ -144,10 +229,13 @@ def main():
         f"_{initials}_{suffix}.xlsx"
     )
     path = os.path.join(results_dir("lab1"), name)
-    build_workbook(project, serum, parameter, initials, day=day).save(path)
+    build_workbook(
+        project, serum, parameter, initials, seed=seed, low=low, high=high, day=day
+    ).save(path)
 
     #Checkworkbook
     assert_layout(path, project, serum, parameter, initials, day)
+    log_created(path, project, serum, parameter, initials, day, seed, low, high)
     print(path)
 
 
