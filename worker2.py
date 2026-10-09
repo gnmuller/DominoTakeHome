@@ -1,9 +1,11 @@
-import csv
 import os
 import re
+import sqlite3
 from datetime import date, datetime
 
 from openpyxl import load_workbook
+
+import db
 
 from worker1 import (
     INITIALS,
@@ -19,7 +21,6 @@ from worker1 import (
 # ponytail: a comma is always a decimal mark; "1.234,5" is rejected.
 OVERFLOW = {"OVRFLW", "OVERFLOW", "****"}
 MISSING = {"#N/A", "#DIV/0!", "ND", "N.A.", "N.A", "NA"}
-EXTRA_COLUMNS = ("lab", "instrument", "run_date", "flag", "day", "analyst")
 SERUM_ALIASES = {
     "pooled normal human serum": "Pooled Normal Human Serum",
     "pooled nhs": "Pooled Normal Human Serum",
@@ -62,7 +63,6 @@ LABS = {
 }
 
 RAW = "/mnt/data/Worker1Raw"
-DB = "/mnt/data/Worker2DatabaseProxy"
 artifacts_logs = "/mnt/artifacts/worker2.txt"
 
 
@@ -225,69 +225,6 @@ def plate_rows(ws, filename=""):
     return (project, serum, parameter, initials, lab, day, run_date), rows, flagged
 
 
-def duplicate_reason(quartet, known):
-    if quartet in known:
-        return "skipped: plate already in mock_db (" + ", ".join(quartet) + ")"
-    return None
-
-
-def ensure_columns(path):
-    os.makedirs(path, exist_ok=True)
-    file_path = os.path.join(path, "mock_db.csv")
-    if not os.path.isfile(file_path):
-        with open(file_path, "w", encoding="utf-8", newline="") as handle:
-            csv.writer(handle).writerow(
-                ("project", "serums", "PARAMETERS", "initals", "cell", "value") + EXTRA_COLUMNS
-            )
-        return
-    with open(file_path, encoding="utf-8", newline="") as handle:
-        content = handle.read()
-    if not content:
-        return
-    line, sep, rest = content.partition("\n")
-    header_line = line[:-1] if line.endswith("\r") else line
-    header = next(csv.reader([header_line]))
-    missing = [name for name in EXTRA_COLUMNS if name not in header]
-    if not missing:
-        return
-    nl = "\r\n" if line.endswith("\r") else ("\n" if sep else "")
-    with open(file_path, "w", encoding="utf-8", newline="") as handle:
-        handle.write(header_line + "," + ",".join(missing) + nl + rest)
-
-
-def known_plates(path):
-    plates = set()
-    with open(os.path.join(path, "mock_db.csv"), newline="", encoding="utf-8") as handle:
-        for row in csv.DictReader(handle):
-            plates.add(
-                (
-                    row["project"],
-                    row["serums"],
-                    row["PARAMETERS"],
-                    row["initals"],
-                    row.get("lab") or "Lab1",
-                    row.get("day") or "",
-                    row.get("run_date") or "",
-                )
-            )
-    return plates
-
-
-def append_rows(path, rows):
-    path = os.path.join(path, "mock_db.csv")
-    with open(path, "rb") as handle:
-        handle.seek(0, os.SEEK_END)
-        size = handle.tell()
-        needs_nl = False
-        if size:
-            handle.seek(-1, os.SEEK_END)
-            needs_nl = handle.read(1) not in b"\r\n"
-    with open(path, "a", newline="", encoding="utf-8") as handle:
-        if needs_nl:
-            handle.write("\n")
-        csv.writer(handle).writerows(rows)
-
-
 def xlsx_files(root):
     found = []
     for dirpath, _, names in os.walk(root):
@@ -309,6 +246,7 @@ def log_skip(filename, quartet, reason):
     if not reason.startswith("skipped:"):
         reason = f"skipped: {reason}"
     log_line(filename, quartet, reason)
+    return reason
 
 
 def _self_check():
@@ -344,12 +282,6 @@ def _self_check():
         assert str(exc) == "skipped: plate missing lab"
     assert analyst_letter(INITIALS[0]) == "A"
     assert analyst_letter(INITIALS[1]) == "B"
-    assert duplicate_reason(quartet, set()) is None
-    assert duplicate_reason(quartet, {quartet}) == (
-        "skipped: plate already in mock_db (" + ", ".join(quartet) + ")"
-    )
-    other = quartet[:5] + ("day 2", quartet[6])
-    assert duplicate_reason(other, {quartet}) is None
     ws["C3"] = "12Dec2023"
     _, stamped, _ = plate_rows(ws)
     assert stamped[0][8] == "12Dec2023"
@@ -392,56 +324,60 @@ def _self_check():
 
     saved = artifacts_logs
     folder = os.path.join(os.path.dirname(os.path.abspath(__file__)), "_w2_log_check")
-    db_dir = os.path.join(folder, "db")
     artifacts_logs = os.path.join(folder, "worker2.txt")
-    os.makedirs(db_dir, exist_ok=True)
+    os.makedirs(folder, exist_ok=True)
+    conn = None
     try:
         log_skip("bad.xlsx", quartet, "skipped: A2 serum not allowed")
         log_line("good.xlsx", quartet, "accepted")
         logged = open(artifacts_logs, encoding="utf-8").read()
         assert f"{', '.join(quartet)} | skipped: A2 serum not allowed" in logged
         assert "good.xlsx:" in logged and f"{', '.join(quartet)} | accepted" in logged
-        db_path = os.path.join(db_dir, "mock_db.csv")
-        ensure_columns(db_dir)
-        with open(db_path, encoding="utf-8", newline="") as handle:
-            assert next(csv.reader(handle)) == [
-                "project", "serums", "PARAMETERS", "initals", "cell", "value", *EXTRA_COLUMNS
-            ]
-        assert known_plates(db_dir) == set()
-        with open(db_path, "w", encoding="utf-8", newline="") as handle:
-            handle.write("project,serums,PARAMETERS,initals,cell,value\n")
-            handle.write(
-                f"{PROJECTS[0]},{SERUMS[0]},{PARAMETERS[0]},{INITIALS[0]},A1,1.000\n"
-            )
-        ensure_columns(db_dir)
-        with open(db_path, encoding="utf-8", newline="") as handle:
-            assert next(csv.reader(handle))[-len(EXTRA_COLUMNS):] == list(EXTRA_COLUMNS)
-        assert known_plates(db_dir) == {
-            (PROJECTS[0], SERUMS[0], PARAMETERS[0], INITIALS[0], "Lab1", "", "")
-        }
-        with open(db_path, "a", encoding="utf-8", newline="") as handle:
-            handle.write(
-                f"{PROJECTS[1]},{SERUMS[1]},{PARAMETERS[1]},{INITIALS[1]},B1,2.000,Lab2\n"
-            )
-        assert (
-            PROJECTS[1],
-            SERUMS[1],
-            PARAMETERS[1],
-            INITIALS[1],
-            "Lab2",
-            "",
-            "",
-        ) in known_plates(db_dir)
+        db_path = os.path.join(folder, "plates.sqlite")
+        conn = db.ensure(db_path)
+        empty, columns = db.load_rows(db_path)
+        assert empty == [] and columns == list(db.VIEW_COLUMNS)
+        db.insert_plate(conn, quartet, rows, "good.xlsx")
+        db.log_outcome(conn, "good.xlsx", "accepted", "accepted", quartet)
+        conn.commit()
+        loaded, columns = db.load_rows(db_path)
+        assert columns == list(db.VIEW_COLUMNS)
+        by_cell = {row["cell"]: row for row in loaded}
+        assert len(by_cell) == 96
+        assert by_cell["A4"]["value"] == "" and by_cell["A4"]["flag"] == "na"
+        assert by_cell["A5"]["value"] == "-0.015" and by_cell["A6"]["value"] == "-0.008"
+        assert by_cell["A7"]["value"] == "45.000"
+        head = by_cell["A1"]
+        assert head["project"] == quartet[0]
+        assert head["serums"] == quartet[1]
+        assert head["PARAMETERS"] == quartet[2]
+        assert head["initals"] == quartet[3]
+        assert head["lab"] == "Lab3" and head["day"] == "day 1"
+        assert head["run_date"] == quartet[6]
+        assert head["analyst"] == "B" and head["instrument"] == "hand entry"
+        try:
+            db.insert_plate(conn, quartet, rows, "again.xlsx")
+            raise AssertionError("duplicate plate accepted")
+        except sqlite3.IntegrityError:
+            conn.rollback()
+        other = quartet[:5] + ("day 2", quartet[6])
+        db.insert_plate(conn, other, rows, "day2.xlsx")
+        conn.rollback()
+        assert conn.execute("SELECT COUNT(*) FROM plates").fetchone()[0] == 1
+        assert conn.execute("SELECT COUNT(*) FROM wells").fetchone()[0] == 96
+        logged_row = conn.execute(
+            "SELECT outcome, source_file, day, run_date FROM ingest_log"
+        ).fetchone()
+        assert logged_row["outcome"] == "accepted" and logged_row["source_file"] == "good.xlsx"
+        assert logged_row["day"] == 1
+        assert logged_row["run_date"] == datetime.strptime(quartet[6], "%d%b%Y").date().isoformat()
     finally:
         artifacts_logs = saved
-        for name in ("worker2.txt", os.path.join("db", "mock_db.csv")):
-            file_path = os.path.join(folder, name)
-            if os.path.isfile(file_path):
-                os.remove(file_path)
-        if os.path.isdir(db_dir):
-            os.rmdir(db_dir)
-        if os.path.isdir(folder):
-            os.rmdir(folder)
+        if conn is not None:
+            conn.close()
+        for name in os.listdir(folder):
+            os.remove(os.path.join(folder, name))
+        os.rmdir(folder)
 
 
 def main():
@@ -453,34 +389,46 @@ def main():
     if not os.path.isdir(RAW):
         raise FileNotFoundError(f"dataset directory missing: {RAW}")
 
-    #Build Set List of known plates.
-    ensure_columns(DB)
-    known = known_plates(DB)
-
+    conn = db.ensure()
     accepted = skipped = 0
 
     #Cycle Through All Workbooks in the directory.
-    for path in xlsx_files(RAW):
-        name = os.path.basename(path)
-        quartet = None
-        try:
-            ws = load_workbook(path).active
-            quartet = tuple(ws[cell].value for cell in ("A1", "A2", "A3", "A4"))
-            quartet, rows, flagged = plate_rows(ws, name)
-        except Exception as exc:
-            log_skip(name, quartet, str(exc))
-            skipped += 1
-            continue
-        reason = duplicate_reason(quartet, known)
-        if reason:
-            log_skip(name, quartet, reason)
-            skipped += 1
-            continue
-        append_rows(DB, rows)
-        known.add(quartet)
-        detail = "accepted" if not flagged else f"accepted, flagged {flagged} wells"
-        log_line(name, quartet, detail)
-        accepted += 1
+    try:
+        for path in xlsx_files(RAW):
+            name = os.path.basename(path)
+            quartet = None
+            try:
+                ws = load_workbook(path).active
+                quartet = tuple(ws[cell].value for cell in ("A1", "A2", "A3", "A4"))
+                quartet, rows, flagged = plate_rows(ws, name)
+            except Exception as exc:
+                reason = log_skip(name, quartet, str(exc))
+                db.log_outcome(conn, name, "skipped", reason, quartet)
+                conn.commit()
+                skipped += 1
+                continue
+            try:
+                db.insert_plate(conn, quartet, rows, name)
+            except sqlite3.IntegrityError as exc:
+                conn.rollback()
+                if "UNIQUE" not in str(exc):
+                    raise
+                reason = log_skip(
+                    name,
+                    quartet,
+                    "skipped: plate already in mock_db (" + ", ".join(quartet) + ")",
+                )
+                db.log_outcome(conn, name, "skipped", reason, quartet)
+                conn.commit()
+                skipped += 1
+                continue
+            detail = "accepted" if not flagged else f"accepted, flagged {flagged} wells"
+            db.log_outcome(conn, name, "accepted", detail, quartet)
+            conn.commit()
+            log_line(name, quartet, detail)
+            accepted += 1
+    finally:
+        conn.close()
     print(f"accepted {accepted}, skipped {skipped}")
 
 

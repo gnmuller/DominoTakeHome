@@ -133,8 +133,7 @@ def log_destinations(plate_path):
         os.path.join(plate_dir, "worker1.txt"),
     ]
     root = os.environ.get("DOMINO_ARTIFACTS_DIR") or "/mnt/artifacts"
-    if os.path.isdir(root):
-        dests.append(os.path.join(root, "worker1.txt"))
+    dests.append(os.path.join(root, "worker1.txt"))
     return dests
 
 
@@ -257,6 +256,7 @@ def _self_check():
     assert dests == [
         os.path.join(root, "worker1", "run-check.txt"),
         os.path.join(root, "lab2", "worker1.txt"),
+        os.path.join(root, "missing-artifacts", "worker1.txt"),
     ]
     line = json.dumps(record, separators=(",", ":")) + "\n"
     for dest in dests:

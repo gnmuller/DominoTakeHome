@@ -1,10 +1,11 @@
-import csv
 import os
 import re
 
 import streamlit as st
 
-DB = "/mnt/data/Worker2DatabaseProxy/mock_db.csv"
+import db
+
+DB = db.PATH
 QUARTET = ("project", "serums", "PARAMETERS", "initals")
 PRIMARY = ("project", "lab", "run_date", "serums")
 MULTI = ("lab", "run_date", "serums")
@@ -27,9 +28,7 @@ _FULL_WELL = re.compile(r"[A-H](?:[1-9]|1[0-2])")
 
 
 def load_rows(path):
-    with open(path, newline="", encoding="utf-8") as handle:
-        reader = csv.DictReader(handle)
-        return list(reader), list(reader.fieldnames or [])
+    return db.load_rows(path)
 
 
 def _well_ok(cell, text):
