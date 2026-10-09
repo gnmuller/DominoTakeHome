@@ -119,12 +119,17 @@ def _append(path, line):
         os.fsync(handle.fileno())
 
 
+def _log_run_id():
+    # ponytail: one file per run. A shared worker1.txt is replaced by whichever job finishes last.
+    return os.environ.get("DOMINO_RUN_ID") or f"local-{uuid.uuid4().hex[:8]}"
+
+
 def log_destinations(plate_path):
-    # Flow jobs do not keep /mnt/artifacts. The dataset mount is where the xlsx already landed.
+    # Each job has its own /mnt/artifacts. The dataset file is the one all three jobs share.
     plate_dir = os.path.dirname(plate_path)
     dataset = os.path.dirname(plate_dir)
     dests = [
-        os.path.join(dataset, "worker1.txt"),
+        os.path.join(dataset, "worker1", f"{_log_run_id()}.txt"),
         os.path.join(plate_dir, "worker1.txt"),
     ]
     root = os.environ.get("DOMINO_ARTIFACTS_DIR") or "/mnt/artifacts"
@@ -134,7 +139,6 @@ def log_destinations(plate_path):
 
 
 def log_created(path, project, serum, parameter, initials, day, seed, low, high):
-    # ponytail: one append, no lock. A short line stays intact under PIPE_BUF; a longer record needs a lock.
     record = run_record(path, project, serum, parameter, initials, day, seed, low, high)
     line = json.dumps(record, separators=(",", ":")) + "\n"
     for dest in log_destinations(path):
@@ -235,17 +239,23 @@ def _self_check():
     assert record["where"] == "/mnt/data/Worker1Raw/lab1/assay.xlsx"
     root = tempfile.mkdtemp()
     plate = os.path.join(root, "lab2", "assay.xlsx")
-    saved = os.environ.get("DOMINO_ARTIFACTS_DIR")
+    saved_artifacts = os.environ.get("DOMINO_ARTIFACTS_DIR")
+    saved_run = os.environ.get("DOMINO_RUN_ID")
     os.environ["DOMINO_ARTIFACTS_DIR"] = os.path.join(root, "missing-artifacts")
+    os.environ["DOMINO_RUN_ID"] = "run-check"
     try:
         dests = log_destinations(plate)
     finally:
-        if saved is None:
+        if saved_artifacts is None:
             os.environ.pop("DOMINO_ARTIFACTS_DIR", None)
         else:
-            os.environ["DOMINO_ARTIFACTS_DIR"] = saved
+            os.environ["DOMINO_ARTIFACTS_DIR"] = saved_artifacts
+        if saved_run is None:
+            os.environ.pop("DOMINO_RUN_ID", None)
+        else:
+            os.environ["DOMINO_RUN_ID"] = saved_run
     assert dests == [
-        os.path.join(root, "worker1.txt"),
+        os.path.join(root, "worker1", "run-check.txt"),
         os.path.join(root, "lab2", "worker1.txt"),
     ]
     line = json.dumps(record, separators=(",", ":")) + "\n"

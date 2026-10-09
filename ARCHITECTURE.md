@@ -23,7 +23,7 @@ flowchart TD
   l2["Lab 2 · West<br/>worker1_lab2.py"]
   l3["Lab 3 · East<br/>worker1_lab3.py"]
   raw["Worker1Raw<br/>xlsx plates"]
-  w1log["worker1.txt<br/>creation log"]
+  w1log["worker1/run-id.txt<br/>creation log"]
   w2["worker2.py<br/>normalize"]
   db["mock_db.csv<br/>database"]
   log["worker2.txt<br/>artifact log"]
@@ -93,7 +93,7 @@ The file in the repo is a seed: 960 rows, 10 plates, 96 wells each, and only the
 
 ### worker1.txt
 
-Append-only log of one JSON line per accepted plate. The line records when the job ran, the filename, and the full path, plus the input id (`project|serum|parameter|initials|day` from the values passed into `build_workbook`), the git commit (or the Flyte task version, or `unknown`), the seed and reading range, the Python, openpyxl, and hardware tier, and `DOMINO_RUN_ID` (or `local`). The same line is appended to `/mnt/data/Worker1Raw/worker1.txt`, to `worker1.txt` in that lab's folder, and printed on stdout. Flow jobs do not keep `/mnt/artifacts`, so the dataset copies are the ones that remain. When `/mnt/artifacts` or `DOMINO_ARTIFACTS_DIR` already exists, the line is appended there too. A failed assert does not log. No rotation and no lock; each line is one write.
+Append-only log of one JSON line per accepted plate. The line records when the job ran, the filename, and the full path, plus the input id (`project|serum|parameter|initials|day` from the values passed into `build_workbook`), the git commit (or the Flyte task version, or `unknown`), the seed and reading range, the Python, openpyxl, and hardware tier, and `DOMINO_RUN_ID` (or `local`). The same line is appended to `worker1.txt` in that lab's folder and printed on stdout. Three separate jobs do not share `/mnt/artifacts`; when that directory or `DOMINO_ARTIFACTS_DIR` already exists, the line is appended only to that job's copy. The dataset copy is one file per run, `/mnt/data/Worker1Raw/worker1/<DOMINO_RUN_ID>.txt`, because parallel jobs replace a shared file and the last finish would leave only its line. With no run id the name is `local-` plus 8 hex characters. A root `worker1.txt` can remain from an earlier shared write; new runs do not append to it. A failed assert does not log. No rotation; each line is one write.
 
 ### worker2.txt
 
@@ -144,8 +144,8 @@ Every lab starts from `build_workbook`. Worker 2 reads the same cells. This layo
 
 ## Mounts
 
-- `/mnt/data/Worker1Raw` holds `lab1`, `lab2`, and `lab3`, plus `worker1.txt` and a `worker1.txt` inside each lab folder.
+- `/mnt/data/Worker1Raw` holds `lab1`, `lab2`, and `lab3`, a `worker1.txt` inside each lab folder, and `worker1/<run id>.txt` for each job.
 - `/mnt/data/Worker2DatabaseProxy` holds the live CSV.
-- `/mnt/artifacts/worker1.txt` is a copy of the lab creation log when that directory is already mounted.
+- `/mnt/artifacts/worker1.txt` is that job's copy of the creation log when the directory is already mounted. Jobs do not share it.
 - `/mnt/artifacts/worker2.txt` is the ingest log.
 - `/workflow/inputs` and `/workflow/outputs` belong only to `add.py` and `sqrt.py`.
