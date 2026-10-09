@@ -85,9 +85,77 @@ Flag tokens: `OVRFLW`, `OVERFLOW`, `****`, blank, `#N/A`, `#DIV/0!`, `ND`, `N.A.
 
 ### plates.sqlite
 
-Runtime path `/mnt/data/Worker2DatabaseProxy/plates.sqlite`, created by `db.py`. Worker 2 inserts one `plates` row and 96 `wells` rows in a single transaction. A duplicate plate key rolls back. Skip and accept lines also go into `ingest_log`.
+Runtime path `/mnt/data/Worker2DatabaseProxy/plates.sqlite`, created by `db.py` `ensure`. Worker 2 inserts one `plates` row and 96 `wells` rows in a single transaction. A duplicate plate key rolls back. Skip and accept lines also go into `ingest_log`. `connect` turns foreign keys on.
 
-The app reads the `mock_db` view, which still uses the spellings it expects: `project`, `serums`, `PARAMETERS`, `initals`, `cell`, `value`, `lab`, `instrument`, `run_date`, `flag`, `day`, `analyst`. `run_date` is stored as `YYYY-MM-DD` and shown as `09Oct2026`. `day` is stored as an integer and shown as `day N`. An empty well value is `''` with a flag.
+#### plates
+
+One row per accepted plate.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id` | integer | primary key |
+| `project` | text | not null, `Domino-` plus 7 digits |
+| `serum` | text | not null |
+| `parameter` | text | not null |
+| `initials` | text | not null, two uppercase letters |
+| `lab` | text | not null, `Lab1`, `Lab2`, or `Lab3` |
+| `day` | integer | not null, at least 1 |
+| `run_date` | text | not null, `YYYY-MM-DD` |
+| `analyst` | text | not null, `A` through `J` |
+| `instrument` | text | not null, non-empty |
+| `source_file` | text | not null |
+| `ingested_at` | text | not null, default UTC timestamp |
+
+Unique key: `(project, serum, parameter, initials, lab, day, run_date)`. Index `plates_browse` on `(project, lab, run_date, serum)`.
+
+#### wells
+
+96 rows per plate. Primary key `(plate_id, well)`. A numeric well has a value and an empty flag. A flagged well has a null value.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `plate_id` | integer | not null, references `plates.id` |
+| `well` | text | not null, `A1`–`H12` |
+| `value` | real | null when flagged |
+| `flag` | text | not null, default `''`; one of `''`, `blank`, `overflow`, `na` |
+
+#### ingest_log
+
+One row per file worker 2 considers. Identity columns stay null when the plate was skipped before those cells were known.
+
+| Column | Type | Rule |
+| --- | --- | --- |
+| `id` | integer | primary key |
+| `logged_at` | text | not null, default UTC timestamp |
+| `source_file` | text | not null |
+| `outcome` | text | not null, `accepted` or `skipped` |
+| `detail` | text | not null |
+| `project` | text | nullable |
+| `serum` | text | nullable |
+| `parameter` | text | nullable |
+| `initials` | text | nullable |
+| `lab` | text | nullable |
+| `day` | integer | nullable |
+| `run_date` | text | nullable |
+
+#### mock_db
+
+View the app reads. Names keep the spellings the filters expect. `run_date` is stored as `YYYY-MM-DD` and shown as `09Oct2026`. `day` is stored as an integer and shown as `day N`. An empty well value is `''`.
+
+| Column | Source |
+| --- | --- |
+| `project` | `plates.project` |
+| `serums` | `plates.serum` |
+| `PARAMETERS` | `plates.parameter` |
+| `initals` | `plates.initials` |
+| `cell` | `wells.well` |
+| `value` | well value to 3 decimal places, or `''` when null |
+| `lab` | `plates.lab` |
+| `instrument` | `plates.instrument` |
+| `run_date` | `plates.run_date` as `09Oct2026` |
+| `flag` | `wells.flag` |
+| `day` | `day N` from `plates.day` |
+| `analyst` | `plates.analyst` |
 
 `mock_db.csv` in the repo is an unused seed: 960 rows, 10 plates, 96 wells each, and only the first six columns. Nothing reads or writes it.
 
